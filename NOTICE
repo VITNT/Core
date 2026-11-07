@@ -1,0 +1,19 @@
+Core incorporates and adapts UI code and font assets from VERT.
+
+Upstream: https://github.com/VERT-sh/VERT
+Revision: 257bcb3b2bb6a501bae0faf9ffb05060ee00c3f7
+Copyright: VERT contributors
+License: GNU Affero General Public License v3.0 (see LICENSE)
+
+Adapted on October 29, 2026:
+- app.scss theme tokens and base controls, with local font import paths.
+- Panel.svelte, retained as the shared surface component.
+- Navbar/Base.svelte layout, adapted to the OCR upload/extract/settings actions.
+- Uploader.svelte layout, adapted to the OCR queue and accepted file types.
+- The home-page layout, shortened to the OCR tool.
+- Host Grotesk webfonts and background SVG.
+
+The modified application's source is provided through the Source code link in
+the interface and can be regenerated with npm run source. Font assets retain
+their separate SIL Open Font License notices. VERT's name and logo are not used
+as this application's identity.

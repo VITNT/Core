@@ -1,0 +1,10 @@
+node_modules/
+.svelte-kit/
+build/
+.env
+.env.*
+!.env.example
+static/ocr/
+static/pdf/
+static/source.tar.gz
+.DS_Store

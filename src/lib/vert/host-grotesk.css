@@ -1,0 +1,49 @@
+@font-face {
+	font-display: swap;
+	font-family: "Host Grotesk";
+	font-style: normal;
+	font-weight: 400;
+	src: url("./fonts/HostGrotesk-Regular.woff2") format("woff2");
+}
+
+@font-face {
+	font-display: swap;
+	font-family: "Host Grotesk";
+	font-style: italic;
+	font-weight: 400;
+	src: url("./fonts/HostGrotesk-Italic.woff2") format("woff2");
+}
+
+@font-face {
+	font-display: swap;
+	font-family: "Host Grotesk";
+	font-style: normal;
+	font-weight: 500;
+	src: url("./fonts/HostGrotesk-Medium.woff2") format("woff2");
+}
+
+@font-face {
+	font-display: swap;
+	font-family: "Host Grotesk";
+	font-style: italic;
+	font-weight: 500;
+	src: url("./fonts/HostGrotesk-MediumItalic.woff2")
+		format("woff2");
+}
+
+@font-face {
+	font-display: swap;
+	font-family: "Host Grotesk";
+	font-style: normal;
+	font-weight: 600;
+	src: url("./fonts/HostGrotesk-SemiBold.woff2") format("woff2");
+}
+
+@font-face {
+	font-display: swap;
+	font-family: "Host Grotesk";
+	font-style: italic;
+	font-weight: 600;
+	src: url("./fonts/HostGrotesk-SemiBoldItalic.woff2")
+		format("woff2");
+}
