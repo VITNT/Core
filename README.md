@@ -8,7 +8,7 @@ The About tab in the OCR workspace describes Core’s supported files, Khmer and
 
 ## Run
 
-Requires Node.js 24.
+Requires Node.js 26 LTS.
 
 ```sh
 npm install

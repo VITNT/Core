@@ -1,4 +1,4 @@
-FROM node:24-bookworm-slim AS build
+FROM node:26-bookworm-slim AS build
 WORKDIR /app
 ARG APP_ORIGIN
 ENV APP_ORIGIN=$APP_ORIGIN
@@ -8,7 +8,7 @@ COPY . .
 RUN npm ci
 RUN npm run check && npm run build
 
-FROM node:24-bookworm-slim AS runtime
+FROM node:26-bookworm-slim AS runtime
 RUN apt-get update && apt-get install -y --no-install-recommends libreoffice-writer fonts-khmeros fonts-noto-core \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
