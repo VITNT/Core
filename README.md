@@ -8,7 +8,7 @@ The About tab in the OCR workspace describes Core’s supported files, Khmer and
 
 ## Run
 
-Requires Node.js 22.17+ (Node 24 recommended).
+Requires Node.js 24.
 
 ```sh
 npm install
@@ -55,6 +55,14 @@ Controls include accurate/fast models, Khmer/Khmer + English/English, 200/300 DP
 Limits: 20 queued files, 50 MB per file, 200 pages per PDF, 20 megapixels per rendered page. Oversized images/pages are scaled down. The renderer accepts two concurrent conversions per Node process and has a 60-second conversion timeout. Password-protected PDFs need to be unlocked first.
 
 ## Privacy and hosting
+
+### Vercel
+
+Vercel builds select `@sveltejs/adapter-vercel` automatically when `VERCEL=1`; local and Docker builds keep the Node adapter. `vercel.json` selects the SvelteKit framework preset and resets the output directory to the framework default. Do not override it with `public` or `build` in the Vercel dashboard. Set `APP_ORIGIN` to your public HTTPS origin before building, then redeploy after pushing the changes.
+
+PDF/image OCR runs in the browser and works on Vercel. Office document conversion still needs LibreOffice on the app server; the Vercel deployment does not bundle it. To support DOC, DOCX, ODT, and RTF with the current renderer, deploy the included Dockerfile on a Node/container host instead.
+
+### Node and Docker
 
 PDFs/images are processed in the browser. Office documents are uploaded to **your app server** for rendering; the interface states this explicitly. There are no accounts, analytics, or third-party OCR calls.
 
