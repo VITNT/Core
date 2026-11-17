@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createCanvas } from '@napi-rs/canvas';
 import type { Page } from 'tesseract.js';
-import { prepareTextRegion, recognitionRegions } from '../src/lib/ocr-regions';
+import { countTextLines, prepareTextRegion, recognitionRegions, splitWideGaps } from '../src/lib/ocr-regions';
 const factory = () => createCanvas(1, 1) as unknown as HTMLCanvasElement;
 
 test('normalizes full glyph height consistently across source resolutions, including detached marks', () => {
@@ -53,4 +53,38 @@ test('keeps side-by-side text columns as independent regions in block reading or
   assert.ok(regions[0].left < 300 && regions[1].left < 300);
   assert.ok(regions[2].left > 300 && regions[3].left > 300);
   assert.ok(regions.every((r) => r.width < 300));
+});
+
+test('counts one line in a tall heading row and two in a row of merged lines', () => {
+  const source = createCanvas(800, 400);
+  const ctx = source.getContext('2d');
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, 800, 400);
+  ctx.fillStyle = '#000';
+  ctx.fillRect(50, 40, 600, 90); // one large line
+  ctx.fillRect(50, 220, 600, 40); ctx.fillRect(50, 300, 600, 40); // two lines
+  const canvas = source as unknown as HTMLCanvasElement;
+  assert.equal(countTextLines(canvas, { left: 0, top: 0, width: 800, height: 180 }), 1);
+  assert.equal(countTextLines(canvas, { left: 0, top: 190, width: 800, height: 180 }), 2);
+});
+
+test('splits a row at wide gaps, keeps word spaces together and leaves out distant specks', () => {
+  const source = createCanvas(1000, 60);
+  const ctx = source.getContext('2d');
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, 1000, 60);
+  ctx.fillStyle = '#000';
+  ctx.fillRect(20, 10, 100, 40);   // heading label
+  ctx.fillRect(135, 10, 60, 40);   // second word after an ordinary space
+  ctx.fillRect(500, 10, 150, 40);  // title far to the right
+  ctx.fillRect(800, 40, 4, 4);     // speck
+  const region = { left: 0, top: 0, width: 1000, height: 60 };
+  const pieces = splitWideGaps(source as unknown as HTMLCanvasElement, region, 7);
+  assert.equal(pieces.length, 2);
+  assert.ok(pieces.every((piece) => piece.segmentOf === 7));
+  assert.ok(pieces[0].left <= 20 && pieces[0].left + pieces[0].width >= 195 && pieces[0].left + pieces[0].width < 500);
+  assert.ok(pieces[1].left <= 500 && pieces[1].left + pieces[1].width >= 650 && pieces[1].left + pieces[1].width < 800);
+  // An ordinary line is returned unchanged; a list row keeps its label handling.
+  ctx.fillStyle = '#fff'; ctx.fillRect(400, 0, 600, 60);
+  assert.deepEqual(splitWideGaps(source as unknown as HTMLCanvasElement, region, 0), [region]);
+  const list = { ...region, bodyLeft: 130 };
+  assert.deepEqual(splitWideGaps(source as unknown as HTMLCanvasElement, list, 0), [list]);
 });

@@ -1,16 +1,25 @@
 import type { RecognizeOptions, Worker, WorkerParams } from 'tesseract.js';
 import type { OcrOptions, PageResult } from './types';
 import { extension, MAX_PAGES, officeExtensions } from './files';
-import { cleanOcrText } from './ocr-text';
-import { formatOcrParagraphs } from './ocr-paragraphs';
-import { recheckCrop, reviewOcrText } from './ocr-review';
 import { imageDimensions, prepareOcrImage } from './ocr-image';
 import { recognizePreparedPage } from './ocr-read';
-import { recheckKhmerHeadings } from './ocr-headings';
+import { finalizeOcrPage } from './ocr-finalize';
 import { createImageBatchStore, processImageBatch } from './ocr-batch';
+import { parseWordList, type WordList } from './ocr-dictionary';
 
 type Hooks = { progress: (value: number, stage: string) => void; page: (page: PageResult) => void };
 const abortError = () => new DOMException('Conversion cancelled.', 'AbortError');
+
+// Downloaded once per tab, the first time a Khmer line vote needs it.
+let khmerWords: Promise<WordList> | undefined;
+function loadKhmerWords() {
+  khmerWords ??= fetch(`${location.origin}/ocr/khm-words.txt`)
+    .then((response) => { if (!response.ok) throw new Error(`Word list: HTTP ${response.status}`); return response.text(); })
+    .then(parseWordList)
+    // The vote still works without it, but say so: accuracy drops quietly otherwise.
+    .catch((error) => { khmerWords = undefined; console.warn('Khmer word list unavailable; line votes run without it.', error); throw error; });
+  return khmerWords;
+}
 
 export class OcrSession {
   private worker?: Worker;
@@ -73,8 +82,9 @@ export class OcrSession {
       const worker = await this.getWorker();
       this.checkAbort();
       const parameters: Partial<RecognizeOptions> & Partial<WorkerParams> = { rotateAuto: false, user_defined_dpi: String(Math.round(dpi)), thresholding_method: '0' };
-      let data = await recognizePreparedPage(worker, canvas, this.options, parameters, {
+      const data = await recognizePreparedPage(worker, canvas, this.options, parameters, {
         checkAbort: () => this.checkAbort(),
+        ...(this.options.quality === 'best' && this.options.language !== 'eng' ? { scriptWorker: () => this.getWorker(true), words: loadKhmerWords } : {}),
         onPass: (start, end, stage) => {
           progress(start, `${stage} · page ${number} of ${total}`);
           this.currentProgress = (value) => progress(start + value * (end - start), `${stage} · page ${number} of ${total}`);
@@ -82,46 +92,21 @@ export class OcrSession {
       });
       this.checkAbort();
       this.currentProgress = undefined;
-      if (this.options.quality === 'best' && this.options.language !== 'eng') {
-        data = await recheckKhmerHeadings(data, canvas, () => this.getWorker(true), {
-          checkAbort: () => this.checkAbort(),
-          onLine: (index, count) => progress(0.9, `Checking Khmer heading ${index + 1} of ${count} · page ${number} of ${total}`),
-        });
-      }
-      const reviewed = await reviewOcrText(data, async (word, index, count) => {
-        this.checkAbort();
-        progress(0.9 + 0.1 * index / count, `Checking text · page ${number} of ${total}`);
-        const region = recheckCrop(word, canvas.width, canvas.height);
-        if (!region) return;
-        const crop = document.createElement('canvas');
-        crop.width = Math.max(1, Math.round(region.width * region.scale));
-        crop.height = Math.max(1, Math.round(region.height * region.scale));
-        const context = crop.getContext('2d')!;
-        context.fillStyle = '#fff'; context.fillRect(0, 0, crop.width, crop.height);
-        context.drawImage(canvas, region.left, region.top, region.width, region.height, 0, 0, crop.width, crop.height);
-        try {
-          const { PSM } = await import('tesseract.js');
-          const options: Partial<RecognizeOptions> & Partial<WorkerParams> = { ...parameters, tessedit_pageseg_mode: PSM.SINGLE_WORD };
-          // Per-recognition parameters are restored by Tesseract.js afterwards.
-          const result = await worker.recognize(crop, options, { text: true, blocks: false });
-          this.checkAbort();
-          return result.data;
-        } catch {
-          this.checkAbort();
-          // A failed optional re-read must not discard the successful page OCR.
-          return;
-        } finally {
-          crop.width = crop.height = 0;
-        }
+      const khmer = this.options.quality === 'best' && this.options.language !== 'eng';
+      const final = await finalizeOcrPage(data, canvas, worker, parameters, {
+        checkAbort: () => this.checkAbort(),
+        createCanvas: () => document.createElement('canvas'),
+        ...(khmer ? { scriptWorker: () => this.getWorker(true) } : {}),
+        onHeading: () => progress(0.9, `Checking Khmer heading · page ${number} of ${total}`),
+        onReview: (index, count) => progress(0.9 + 0.1 * index / count, `Checking text · page ${number} of ${total}`),
       });
       this.checkAbort();
       const thumbnail = document.createElement('canvas');
       thumbnail.width = Math.min(1000, source.width);
       thumbnail.height = Math.max(1, Math.round(source.height * thumbnail.width / source.width));
       thumbnail.getContext('2d')!.drawImage(source, 0, 0, thumbnail.width, thumbnail.height);
-      const originalText = formatOcrParagraphs(data).normalize('NFC');
-      const text = formatOcrParagraphs(data, cleanOcrText(reviewed.text));
-      hooks.page({ number, text, ...(text !== originalText ? { originalText } : {}), reviewWords: reviewed.reviewWords, confidence: data.confidence, preview: thumbnail.toDataURL('image/jpeg', 0.8) });
+      const { text, originalText } = final;
+      hooks.page({ number, text, ...(text !== originalText ? { originalText } : {}), reviewWords: final.reviewWords, confidence: final.confidence, preview: thumbnail.toDataURL('image/jpeg', 0.8) });
       thumbnail.width = thumbnail.height = 0;
       progress(1, `Read ${number} of ${total} images`);
     } finally {

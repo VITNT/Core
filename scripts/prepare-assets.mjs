@@ -1,7 +1,8 @@
 import { cp, mkdir, access, writeFile, readdir } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { dirname, resolve } from 'node:path';
-import { gzipSync } from 'node:zlib';
+import { gzipSync, gunzipSync } from 'node:zlib';
+import { readFile } from 'node:fs/promises';
 
 const require = createRequire(import.meta.url);
 const root = resolve(import.meta.dirname, '..');
@@ -34,4 +35,11 @@ for (const language of ['khm', 'eng', 'Khmer']) {
     await writeFile(target, gzipSync(Buffer.from(await response.arrayBuffer())));
   }
 }
+// Khmer word list for the line vote. It is the word list inside tessdata_best's
+// khm.traineddata (Apache 2.0), tracked in assets/ so every build ships it:
+//   combine_tessdata -u khm.traineddata khm. && dawg2wordlist khm.lstm-unicharset khm.lstm-word-dawg khm-words.txt
+const wordList = gunzipSync(await readFile(resolve(root, 'assets/khm-words.txt.gz'))).toString('utf8');
+const wordCount = wordList.split('\n').filter((line) => line.trim()).length;
+if (wordCount < 30_000) throw new Error(`Khmer word list looks incomplete (${wordCount} words).`);
+await writeFile(resolve(ocr, 'khm-words.txt'), wordList);
 console.log('Local OCR and PDF assets ready.');

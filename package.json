@@ -16,7 +16,8 @@
     "source": "node scripts/package-source.mjs",
     "predev": "npm run source",
     "prebuild": "npm run source",
-    "benchmark:book": "node --import tsx scripts/benchmark-book.mjs"
+    "benchmark:book": "node --import tsx scripts/benchmark-book.mjs",
+    "benchmark:files": "node --import tsx scripts/benchmark-files.mjs"
   },
   "dependencies": {
     "@fontsource/noto-sans-khmer": "^5.2.8",

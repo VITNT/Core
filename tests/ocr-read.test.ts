@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import type { Page, Worker } from 'tesseract.js';
 import { createCanvas } from '@napi-rs/canvas';
 import { defaultOptions } from '../src/lib/types';
-import { combineRowReadings, mergeRegionReadings, preferRowReading, preferSlantReading, recognizePreparedPage } from '../src/lib/ocr-read';
+import { combineRowReadings, mergeRegionReadings, needsScriptReading, preferRowReading, preferScriptLine, preferSlantReading, recognizePreparedPage } from '../src/lib/ocr-read';
 import { formatOcrParagraphs } from '../src/lib/ocr-paragraphs';
 
 function page(text: string, confidence = 80): Page {
@@ -185,4 +185,102 @@ test('does not erase a repeated letter gutter when its labels are not recognized
   assert.equal(fullReads, 1);
   assert.match(result.text, /Original body reading/);
   assert.doesNotMatch(result.text, /1\./);
+});
+
+test('row reading replaces a page reading that shredded lines into confident fragments', () => {
+  const region = (index: number) => ({ left: 100, top: 80 + index * 50, width: 600, height: 30 });
+  const sentence = 'ភាសាខ្មែរ សេចក្តីផ្តើម ទំព័រ';
+  // Segmentation failure: one real line, then a lost line as digit/letter fragments.
+  const shredded = combineRowReadings(page('base'), [sentence, '2', '30', 'យ', '=៥%', '5'].map((text, index) => ({ region: region(index), data: page(text, 92) })));
+  const rows = combineRowReadings(page('base'), [sentence, sentence].map((text, index) => ({ region: region(index), data: page(text, 80) })));
+  assert.equal(preferRowReading(shredded, rows, 2, 2, false), true);
+  // A confidently read number in a real line must still survive.
+  const numbered = combineRowReadings(page('base'), [{ region: region(0), data: page(sentence + ' 2026', 92) }]);
+  assert.equal(preferRowReading(numbered, rows, 2, 2, false), false);
+  // Rows that lost most of the text are not an improvement.
+  assert.equal(preferRowReading(shredded, page('ភាសា', 95), 2, 2, false), false);
+});
+
+test('Khmer rows prefer the script model unless it lost text, numbers or English', () => {
+  assert.equal(needsScriptReading(page('Invoice reference amount', 92)), false);
+  assert.equal(needsScriptReading(page('2026', 95)), false);
+  assert.equal(needsScriptReading(page('ភាសាខ្មែរ សេចក្តីផ្តើម', 92)), true);
+  assert.equal(needsScriptReading(page('CLUE EIA', 40)), true);
+  const first = page('ភាសាខ្មែរ Invoice 2026', 90);
+  assert.equal(preferScriptLine(first, page('ភាសាខ្មែរ Invoice 2026', 60)), true);
+  assert.equal(preferScriptLine(first, page('ភាសាខ្មែរ Invoice', 95)), false);
+  assert.equal(preferScriptLine(first, page('ភាសាខ្មែរ នេះ 2026', 95)), false);
+  assert.equal(preferScriptLine(first, page('ភាសា', 95)), false);
+  assert.equal(preferScriptLine(first, page('', 95)), false);
+});
+
+test('reads Khmer rows with the script model and keeps the language model for English rows', async () => {
+  const canvas = createCanvas(600, 300), ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, 600, 300); ctx.fillStyle = '#000';
+  ctx.fillRect(80, 80, 300, 40); ctx.fillRect(80, 180, 300, 40);
+  const first = page('garbled', 50);
+  let calls = 0, scriptCalls = 0;
+  const worker = { recognize: async () => {
+    calls++;
+    // Page read, then the first row twice (standard and one voting variant), then the English row.
+    return { data: calls === 1 ? first : calls <= 3 ? page('ភាសាខ្មែរ សេចក្តីផ្ដើម', 85) : page('Invoice reference amount', 92) };
+  } } as unknown as Worker;
+  const script = { recognize: async () => { scriptCalls++; return { data: page('ភាសាខ្មែរ សេចក្តីផ្តើម', 70) }; } } as unknown as Worker;
+  const result = await recognizePreparedPage(worker, canvas as unknown as HTMLCanvasElement, defaultOptions, {}, {
+    checkAbort() {}, createCanvas: () => createCanvas(1, 1) as unknown as HTMLCanvasElement, scriptWorker: async () => script,
+  });
+  assert.equal(scriptCalls, 3);
+  assert.equal(calls, 4);
+  assert.match(result.text, /សេចក្តីផ្តើម/);
+  assert.match(result.text, /Invoice reference amount/);
+  assert.doesNotMatch(result.text, /garbled/);
+});
+
+test('row pass keeps every line the page reading found', async () => {
+  const { coverPageLines } = await import('../src/lib/ocr-read');
+  // Page reading with ten lines; the row pass read nine and lost the last one.
+  const lines = Array.from({ length: 10 }, (_, index) => `ភាសាខ្មែរ ជួរ ${index + 1}`);
+  const pageReading = combineRowReadings(page('', 0), lines.map((text, index) => ({
+    region: { left: 100, top: 100 + index * 50, width: 400, height: 30 }, data: page(text, 85) })));
+  const rows = lines.map((text, index) => ({ region: { left: 100, top: 100 + index * 50, width: 400, height: 30 }, data: page(index === 9 ? '' : text, 90) }));
+  const { readings, expected } = coverPageLines(pageReading, rows, false);
+  assert.equal(expected, 10);
+  const combined = combineRowReadings(pageReading, readings);
+  assert.match(combined.text, /ជួរ 10/);
+  // Without the fill the same nine-of-ten reading is no longer accepted.
+  assert.equal(preferRowReading(pageReading, combineRowReadings(pageReading, rows), 9, 10, false), false);
+  assert.equal(preferRowReading(pageReading, combined, 10, expected, false), true);
+});
+
+test('row pass inserts confident page lines that no row region covers, in reading order', async () => {
+  const { coverPageLines } = await import('../src/lib/ocr-read');
+  const pageReading = combineRowReadings(page('', 0), ['ជួរទីមួយ', 'ជួរកណ្ដាល', 'ជួរទីបី'].map((text, index) => ({
+    region: { left: 100, top: 100 + index * 50, width: 400, height: 30 }, data: page(text, 88) })));
+  const rows = [0, 2].map((index) => ({ region: { left: 100, top: 100 + index * 50, width: 400, height: 30 }, data: page(index ? 'ជួរទីបី' : 'ជួរទីមួយ', 90) }));
+  const { readings } = coverPageLines(pageReading, rows, false);
+  assert.equal(combineRowReadings(pageReading, readings).text.replace(/\n+/gu, ' ').trim(), 'ជួរទីមួយ ជួរកណ្ដាល ជួរទីបី');
+});
+
+test('row reading that lost most of a confident line falls back to the page line', async () => {
+  const { coverPageLines } = await import('../src/lib/ocr-read');
+  const region = { left: 100, top: 100, width: 400, height: 30 };
+  const pageReading = combineRowReadings(page('', 0), [{ region, data: page('ផ្នែករឹងរបស់ផែនដីមានបីស្រទាប់', 85) }]);
+  const { readings } = coverPageLines(pageReading, [{ region, data: page('ផ្នែក', 95) }], false);
+  assert.match(readings[0].data.text, /បីស្រទាប់/);
+  // Contents pages keep their row readings: leaders read as letters inflate the page reading.
+  assert.equal(coverPageLines(pageReading, [{ region, data: page('ផ្នែក', 95) }], true).readings[0].data.text.trim(), 'ផ្នែក');
+});
+
+test('pieces of a row split at wide gaps return to one line, in a paragraph of their own', () => {
+  const rows = [
+    { region: { left: 50, top: 80, width: 200, height: 30, segmentOf: 0 }, data: page('ជំពូក១') },
+    { region: { left: 500, top: 80, width: 200, height: 30, segmentOf: 0 }, data: page('ភពផែនដី') },
+    { region: { left: 50, top: 130, width: 600, height: 30 }, data: page('សំណួរ១ តើផ្នែករឹង') },
+    { region: { left: 50, top: 180, width: 600, height: 30 }, data: page('របស់ផែនដី') },
+  ];
+  const result = combineRowReadings(page('broken', 40), rows);
+  assert.equal(formatOcrParagraphs(result), 'ជំពូក១ ភពផែនដី\n\nសំណួរ១ តើផ្នែករឹងរបស់ផែនដី');
+  const heading = result.blocks![0].paragraphs[0].lines[0];
+  assert.equal(heading.words.length, 2);
+  assert.ok(heading.bbox.x0 < 100 && heading.bbox.x1 > 500);
 });

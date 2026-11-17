@@ -14,6 +14,8 @@ import { formatOcrParagraphs } from '../src/lib/ocr-paragraphs.ts';
 import { cleanOcrText } from '../src/lib/ocr-text.ts';
 import { processImageBatch } from '../src/lib/ocr-batch.ts';
 import { defaultOptions } from '../src/lib/types.ts';
+import { parseWordList } from '../src/lib/ocr-dictionary.ts';
+const words = parseWordList(await readFile(new URL('../static/ocr/khm-words.txt', import.meta.url), 'utf8'));
 
 const require = createRequire(import.meta.url);
 const { createCanvas, loadImage } = require('@napi-rs/canvas'); // PDF.js's native canvas dependency.
@@ -32,7 +34,7 @@ const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
 pdfjs.GlobalWorkerOptions.workerSrc = pathToFileURL(require.resolve('pdfjs-dist/legacy/build/pdf.worker.mjs')).href;
 const task = pdfjs.getDocument({ data: new Uint8Array(bytes), isEvalSupported: false });
 const pdf = await task.promise;
-let worker;
+let worker, scriptWorker;
 const results = [], comparisons = [];
 const options = { ...defaultOptions };
 const factory = () => createCanvas(1, 1);
@@ -96,7 +98,11 @@ try {
       }
       const started = performance.now();
       const adapter = { ...worker, recognize: (image, parameters, output) => worker.recognize(image.toBuffer('image/png'), parameters, output) };
-      const data = await recognizePreparedPage(adapter, canvas, options, parameters, { checkAbort, createCanvas: factory });
+      const scriptAdapter = async () => {
+        scriptWorker ??= await createWorker('Khmer', OEM.LSTM_ONLY, { workerPath: join(root, 'scripts/ocr-benchmark-worker.cjs'), langPath: join(root, 'static/ocr/best'), cacheMethod: 'none', errorHandler: () => {} });
+        return { ...scriptWorker, recognize: (image, parameters, output) => scriptWorker.recognize(image.toBuffer('image/png'), parameters, output) };
+      };
+      const data = await recognizePreparedPage(adapter, canvas, options, parameters, { checkAbort, createCanvas: factory, scriptWorker: scriptAdapter, words: async () => words });
       const text = formatOcrParagraphs(data, cleanOcrText(data.text));
       const result = { page: number, confidence: data.confidence, characters: [...text].length, seconds: (performance.now() - started) / 1000, text };
       results.push(result);
@@ -119,4 +125,4 @@ try {
   await writeFile(join(output, 'report.json'), JSON.stringify(report, null, 2));
   await writeFile(join(output, 'extracted.txt'), results.map((page) => page.text).join('\n\n'));
   console.log(JSON.stringify(report, null, 2));
-} finally { await worker?.terminate(); await task.destroy(); await rm(temporary, { recursive: true, force: true }); }
+} finally { await worker?.terminate(); await scriptWorker?.terminate(); await task.destroy(); await rm(temporary, { recursive: true, force: true }); }
