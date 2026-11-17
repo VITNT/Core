@@ -629,9 +629,6 @@
   </main>
   <footer class="site-footer">
     <span>Core</span><span aria-hidden="true">•</span><a href="#about" onclick={() => { showSettings = false; activePage = "about"; }}>About Core</a><span aria-hidden="true">•</span><a
-      href="/source.tar.gz"
-      download>Source code</a
-    ><span aria-hidden="true">•</span><a
       href="https://github.com/VERT-sh/VERT"
       target="_blank"
       rel="noreferrer">UI from VERT</a

@@ -811,7 +811,7 @@ main {
   border: 0;
   background: none;
   color: var(--fg);
-  font-family: "Noto Sans Khmer", var(--font-body), sans-serif;
+  font-family: "Battambang", "Noto Sans Khmer", var(--font-body), sans-serif;
   font-size: 16px;
   font-weight: 400;
   line-height: 2.2;
